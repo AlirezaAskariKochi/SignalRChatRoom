@@ -241,13 +241,13 @@ else
                             <span class="sender">Sender : @SelectedUserMessages[i].SenderClientUsername</span>
                         }
                         <p>@SelectedUserMessages[i].Message</p>
-                        <span class="time">@SelectedUserMessages[i].CreatedDate.ToShortTimeString()</span>
+                        <span class="time">send: @SelectedUserMessages[i].CreatedDate.ToShortTimeString() - seen count: @SelectedUserMessages[i].SeenCount - seen date: @SelectedUserMessages[i].SeenDate?.ToShortTimeString()</span>
                     </div>
                 }
             </div>
             <div class="input-area">
                 <input @onkeyup="@(e => KeyHandler(e))" type="text" @bind-value="TextMessage" placeholder="Write your message here.">
-                <button @onclick=@(() => SendMessageAsync(TextMessage, selectedGroup.GroupName)) disabled="@(!IsConnected)">Send</button>
+                <button @onclick=@(() => SendMessageAsync(TextMessage, selectedGroup.GroupName,SecretClientIds)) disabled="@(!IsConnected)">Send</button>
             </div>
         </div>
     </div>
@@ -280,7 +280,7 @@ else
     public string CallerUsername { get; set; } = String.Empty; // Username entered during login.
     public string TextMessage { get; set; } = String.Empty; // Message to be sent.
     public string GroupNameText { get; set; } = String.Empty; // Group name for the message.
-
+    public List<long> SecretClientIds { get; set; } = new List<long>();
     public bool IsAuthenticate { get; set; } = false; // Checks if the client is authenticated. (No database connection, data is stored InMemory. Only checks if the username is entered.)
 
     private List<ClientDto> ClientsOfGroups { get; set; } = new List<ClientDto>(); // List to store clients in a specific group.
@@ -380,13 +380,13 @@ else
         });
 
         // When a caller sends a message to any client in the system, it will be triggered by the server.
-        hubConnection.On<string, ClientDto, string>("groupReceiveMessage", async (message, senderClient, groupName) =>
+        hubConnection.On<ClientMessage>("groupReceiveMessage", async (message) =>
         {
             // Adds the client's messages with the group to the Messages list.
-            Messages.Add(new ClientMessage() { ReceiverClientUsernameOrGroupName = groupName, SenderClientUsername = senderClient.Username, Message = message, IsGroupMessage = true, IsSenderReceiver = (senderClient.Username == CallerUsername) });
+            Messages.Add(message);
 
             // Filters the messages with the selected group by its name and assigns them to the SelectedUserMessages list.
-            FilterUserMessages(groupName, true);
+            FilterUserMessages(message.ReceiverClientUsernameOrGroupName, true);
             await InvokeAsync(StateHasChanged); // UI update.
 
         });
@@ -400,6 +400,22 @@ else
             {
                 // Adds the message to the list of messages sent to the client.
                 Messages.AddRange(clientMessages);
+                // Filters the messages with the selected client by their username and assigns them to the SelectedUserMessages list.
+                FilterUserMessages(selectedClient.Username, false);
+                await InvokeAsync(StateHasChanged); // UI update.
+            }
+        });
+
+        // When a caller sends a message to any client in the system, it will be triggered by the server.
+        hubConnection.On<long>("updateMessageSeen", async (messageId) =>
+        {
+            // Update the message seen data.
+            int index= Messages.FindIndex(x=>x.Id==messageId);
+            if (index != -1)
+            {
+                Messages[index].SeenCount +=1;
+                Messages[index].Seen =true;
+                Messages[index].SeenDate =DateTime.UtcNow;
                 // Filters the messages with the selected client by their username and assigns them to the SelectedUserMessages list.
                 FilterUserMessages(selectedClient.Username, false);
                 await InvokeAsync(StateHasChanged); // UI update.
@@ -424,6 +440,15 @@ else
     {
         GroupDto group = Groups.FirstOrDefault(g => g.GroupName == groupName);
         return (group != null) ? false : true;
+    }
+
+    public async Task AddSecretClient(long clientId)
+    {
+        SecretClientIds.Add(clientId);
+    }
+    public async Task RemoveSecretClient(long clientId)
+    {
+        SecretClientIds.Remove(clientId);
     }
 
 
@@ -525,7 +550,7 @@ else
 
 
     // Triggers the server if the caller will send a message to a client or all clients.
-    async Task SendMessageAsync(string message, string? groupName)
+    async Task SendMessageAsync(string message, string? groupName,List<long>? secretClientIds )
     {
         try
         {
@@ -541,8 +566,8 @@ else
                     StateHasChanged();
 
                     // By triggering the SendMessageAsync method on the server, the message is sent to the selected group.
-                    await hubConnection.SendAsync("SendMessageToGroupAsync", groupName, message);
-
+                    await hubConnection.SendAsync("SendMessageToGroupAsync", groupName, message,secretClientIds);
+                    secretClientIds = new List<long>();
                 }
                 else
                 {
@@ -662,6 +687,15 @@ else
         var clientId = selectedClient.Id;
         var clientConnectionId = selectedClient.ConnectionId;
         await UpdateClientMessageHistory(clientId, clientConnectionId, 1, 10);
+    }
+
+    //Update Client message seen data when scrole chat page
+    public async Task UpdateSeenMessageData(long clientId, ClientMessage message)
+    {
+        if ((!message.Seen && !message.IsGroupMessage) || message.IsGroupMessage )
+        {
+            await hubConnection.SendAsync("AddSeenMessageLogAsync", clientId, message.Id);
+        }
     }
 
     public bool IsConnected =>

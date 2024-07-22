@@ -12,9 +12,13 @@ namespace SignalRChatRoom.Server.Models
         public long? GroupId { get; private set; }
         public string Message { get; private set; } = string.Empty;
         public ChatType Type { get; private set; }
+        public MessageType MessageType { get; private set; }
         public long? ReplyId { get; private set; }
         public long? ForwardId { get; private set; }
-        public ICollection<SeenMessageLog> SeenMessageLogs { get;} =new List<SeenMessageLog>();
+        public bool Seen { get; private set; }
+        public DateTime? SeenDateTime { get; private set; }
+        public ICollection<SeenMessageLog> SeenMessageLogs { get;} = new List<SeenMessageLog>();
+        public ICollection<Client> SecretClients { get;} = new List<Client>();
         public virtual Client FromClient { get; set; }
         public virtual Client? ToClient { get; set; }
         public virtual Group? Group { get; set; }
@@ -25,8 +29,23 @@ namespace SignalRChatRoom.Server.Models
             GroupId = groupId;
             Message = message;
             Type = type;
+            MessageType = MessageType.Normal;
             ReplyId = replyId;
             ForwardId = forwardId;
+            Seen = false;
+        }
+        public ChatRoom(long fromId, long? toId,long? groupId, string message, ChatType type, long? replyId, long? forwardId,List<Client> secretClients)
+        {
+            FromId = fromId;
+            ToId = toId;
+            GroupId = groupId;
+            Message = message;
+            Type = type;
+            MessageType = MessageType.Secret;
+            ReplyId = replyId;
+            ForwardId = forwardId;
+            Seen = false;
+            SecretClients = secretClients;
         }
         public ChatRoom()
         {
@@ -35,8 +54,9 @@ namespace SignalRChatRoom.Server.Models
 
         public void AddSeenMessageLog(long clientId)
         {
-            SeenMessageLogs.Add(new SeenMessageLog(Id,DateTime.UtcNow, clientId));
+            Seen=true;
+            SeenDateTime=DateTime.UtcNow;
+            SeenMessageLogs.Add(new SeenMessageLog(Id,clientId));
         }
-
     }
 }

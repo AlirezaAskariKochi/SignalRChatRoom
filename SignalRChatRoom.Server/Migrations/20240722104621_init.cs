@@ -64,6 +64,8 @@ namespace SignalRChatRoom.Server.Migrations
                     Type = table.Column<int>(type: "int", nullable: false),
                     ReplyId = table.Column<long>(type: "bigint", nullable: true),
                     ForwardId = table.Column<long>(type: "bigint", nullable: true),
+                    Seen = table.Column<bool>(type: "bit", nullable: false),
+                    SeenDateTime = table.Column<DateTime>(type: "datetime2", nullable: true),
                     CreateDate = table.Column<DateTime>(type: "datetime2", nullable: false)
                 },
                 constraints: table =>
@@ -127,7 +129,6 @@ namespace SignalRChatRoom.Server.Migrations
                     Id = table.Column<long>(type: "bigint", nullable: false)
                         .Annotation("SqlServer:Identity", "1, 1"),
                     ChatRoomId = table.Column<long>(type: "bigint", nullable: false),
-                    SeenDateTime = table.Column<DateTime>(type: "datetime2", nullable: false),
                     ClientId = table.Column<long>(type: "bigint", nullable: false),
                     CreateDate = table.Column<DateTime>(type: "datetime2", nullable: false)
                 },

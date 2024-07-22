@@ -15,6 +15,9 @@ namespace SignalRChatRoom.Server.DbContexts
         public DbSet<Group> Groups{ get; set; }
         public DbSet<SeenMessageLog> SeenMessageLogs { get; set; }
 
+
+
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);

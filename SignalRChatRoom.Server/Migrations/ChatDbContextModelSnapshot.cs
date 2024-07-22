@@ -49,6 +49,12 @@ namespace SignalRChatRoom.Server.Migrations
                     b.Property<long?>("ReplyId")
                         .HasColumnType("bigint");
 
+                    b.Property<bool>("Seen")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("SeenDateTime")
+                        .HasColumnType("datetime2");
+
                     b.Property<long?>("ToId")
                         .HasColumnType("bigint");
 
@@ -158,9 +164,6 @@ namespace SignalRChatRoom.Server.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<DateTime>("CreateDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("SeenDateTime")
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");

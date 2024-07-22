@@ -12,7 +12,7 @@ using SignalRChatRoom.Server.DbContexts;
 namespace SignalRChatRoom.Server.Migrations
 {
     [DbContext(typeof(ChatDbContext))]
-    [Migration("20240721134326_init")]
+    [Migration("20240722104621_init")]
     partial class init
     {
         /// <inheritdoc />
@@ -51,6 +51,12 @@ namespace SignalRChatRoom.Server.Migrations
 
                     b.Property<long?>("ReplyId")
                         .HasColumnType("bigint");
+
+                    b.Property<bool>("Seen")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("SeenDateTime")
+                        .HasColumnType("datetime2");
 
                     b.Property<long?>("ToId")
                         .HasColumnType("bigint");
@@ -161,9 +167,6 @@ namespace SignalRChatRoom.Server.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<DateTime>("CreateDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("SeenDateTime")
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");

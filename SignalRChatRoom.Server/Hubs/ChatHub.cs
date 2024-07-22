@@ -1,10 +1,10 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using System.Xml;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using SignalRChatRoom.Server.IRepositories;
 using SignalRChatRoom.Server.Models;
 using SignalRChatRoom.Server.Models.Dtos;
 using SignalRChatRoom.Server.Models.Enums;
-using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 
 namespace SignalRChatRoom.Server.Hubs
 {
@@ -66,19 +66,40 @@ namespace SignalRChatRoom.Server.Hubs
             var clientGroupIds = _groupClientRepository.GetAll().Where(x => x.ClientId == clientId).Select(x => x.GroupId).Distinct().ToList();
             var messages = _chatRoomRepository.GetAll()
                 .Include(x=>x.ToClient)
+                .Include(x=>x.SeenMessageLogs)
                 .Where(c => c.ToId == clientId || c.FromId == clientId || (c.GroupId > 0 && clientGroupIds.Contains(c.GroupId.Value)))
                 .Paginate<ChatRoom>()
                 .Select(x => new ClientMessage()
                 {
+                    Id = x.Id,
                     CreatedDate = x.CreateDate,
                     IsGroupMessage = x.GroupId > 0 ? true : false,
                     IsSenderReceiver = x.FromId == clientId ? true : false,
                     Message = x.Message,
                     ReceiverClientUsernameOrGroupName = x.GroupId > 0 ? x.Group!.GroupName : x.ToClient!.Username,
                     SenderClientUsername = x.FromClient.Username,
+                    Seen = x.Seen,
+                    SeenDate = x.SeenDateTime,
+                    SeenCount = x.Type == ChatType.Public ? x.SeenMessageLogs.Count() : x.Type == ChatType.Private && x.Seen ? 1 : 0,
+                    MessageType = x.MessageType,
+                    SecretClientIds = x.SecretClients.Select(x=>x.Id).ToList(),
                 }).ToList();
 
             await Clients.Client(clientConnectionId).SendAsync("updateReceiveMessages", messages);
+        }
+
+        public async Task AddSeenMessageLogAsync(long clientId,long messageId)
+        {
+            var message =await _chatRoomRepository.GetAll()
+                .Include(x => x.ToClient)
+                .Include(x => x.SeenMessageLogs)
+                .FirstOrDefaultAsync(x=>x.Id==messageId);
+            if (!message.SeenMessageLogs.Any(x=>x.ClientId==clientId))
+            {
+                message.AddSeenMessageLog(clientId);
+                await _chatRoomRepository.UpdateAsync(message);
+                await Clients.All.SendAsync("updateMessageSeen", messageId);
+            }
         }
 
         public async Task GetClientsAsync()
@@ -244,10 +265,11 @@ namespace SignalRChatRoom.Server.Hubs
         }
 
         // Sends a message to the relevant group.
-        public async Task SendMessageToGroupAsync(string groupName, string message)
+        public async Task SendMessageToGroupAsync(string groupName, string message,List<long>? secretClientIds)
         {
             try
             {
+                List<Client> secretClients = new();
                 ClientDto senderClient = await _clientRepository.GetAll().Select(c => new ClientDto()
                 {
                     Id = c.Id,
@@ -256,15 +278,32 @@ namespace SignalRChatRoom.Server.Hubs
                     Guid = c.Guid,
                     ConnectionId = c.ConnectionId,
                 }).FirstOrDefaultAsync(c => c.ConnectionId == Context.ConnectionId);
-
+                if (secretClientIds != null && secretClientIds.Any())
+                {
+                    secretClients = await _clientRepository.GetAll().Where(x => secretClientIds.Contains(x.Id)).ToListAsync();
+                }
                 var group = await _groupRepository.GetAll().FirstOrDefaultAsync(g => g.GroupName == groupName);
-                var chatRoom = new ChatRoom(senderClient.Id, null, group.Id, message, ChatType.Public, null, null);
+                var chatRoom = new ChatRoom(senderClient.Id, null, group.Id, message, ChatType.Public, null, null, secretClients);
                 await _chatRoomRepository.AddAsync(chatRoom);
+                var clientMessage = new ClientMessage()
+                {
+                    Id = chatRoom.Id,
+                    CreatedDate = chatRoom.CreateDate,
+                    IsGroupMessage =true,
+                    IsSenderReceiver = false,
+                    Message = chatRoom.Message,
+                    ReceiverClientUsernameOrGroupName = groupName,
+                    SenderClientUsername = senderClient.Username,
+                    Seen = false,
+                    SeenCount = 0,
+                    MessageType = secretClients.Any()?MessageType.Secret:MessageType.Normal,
+                    SecretClientIds = secretClientIds
+                };
 
                 // Triggers the receiveMessage function in the client. Returns message, senderClient, and groupName values.
                 // The receiveMessage function expects 4 values. The 3rd return value expects a Client, which is null in group messaging.
                 // The 4th return value expects a string, which is null in individual messaging.
-                await Clients.All.SendAsync("groupReceiveMessage", message, senderClient, groupName);
+                await Clients.All.SendAsync("groupReceiveMessage", clientMessage);
             }
             catch (Exception ex)
             {
