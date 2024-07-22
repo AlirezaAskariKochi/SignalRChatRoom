@@ -1,0 +1,669 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+@using SignalRChatRoom.Client.Models
+@implements IAsyncDisposable
+
+@rendermode InteractiveServer
+
+<PageTitle>Chat Room</PageTitle>
+
+<style>
+    /* main-container {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+            } */
+
+    main {
+        overflow-x: auto;
+    }
+
+    .container {
+        display: inline-flex;
+    }
+
+    .users {
+        width: 200px;
+        background-color: #f2f2f2;
+        padding: 20px;
+        border: 1px solid #e0e0e0;
+        box-sizing: border-box;
+    }
+
+        .users h3 {
+            margin-top: 0;
+            padding: 10px;
+        }
+
+        .users ul {
+            list-style-type: none;
+            overflow-y: auto;
+            max-height: 330px;
+            padding: 0;
+        }
+
+        .users .user {
+            cursor: pointer;
+            padding: 10px;
+            margin-bottom: 5px;
+            background-color: #e0e0e0;
+        }
+
+            .users .user.active {
+                background-color: #ffff;
+            }
+
+    .user.disabled {
+        pointer-events: none; /* Tıklanabilirliği devre dışı bırakır */
+        opacity: 0.5; /* Devre dışı bırakılmış gibi bir görünüm sağlar */
+    }
+
+    .conversation {
+        flex: 1;
+        padding: 20px;
+        border: 1px solid #e0e0e0;
+        box-sizing: border-box;
+        min-width: 400px;
+    }
+
+        .conversation .header {
+            background-color: #e0e0e0;
+            padding: 10px;
+            margin-bottom: 20px;
+        }
+
+    .messages {
+        overflow-y: auto;
+        max-height: 400px;
+        min-height: 400px;
+    }
+
+    .message {
+        padding: 10px;
+        margin-bottom: 10px;
+        border-radius: 5px;
+        /* max-width: 70%; */
+        max-width: max-content;
+    }
+
+    .sent {
+        background-color: #DCF8C6;
+        align-self: flex-end;
+        margin-right: 0px !important;
+        margin-left: auto; /* flexbox alignment rule */
+    }
+
+    .received {
+        background-color: #ECE5DD;
+    }
+
+    .time, .sender {
+        font-size: 12px;
+        color: #666;
+    }
+
+    button, input, optgroup, select, textarea {
+        margin: 0;
+        font-family: inherit;
+        font-size: inherit;
+        line-height: inherit;
+        max-width: -webkit-fill-available;
+    }
+
+    .input-area {
+        margin-top: 20px;
+    }
+
+        .input-area input {
+            width: calc(100% - 80px);
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px 0 0 5px;
+        }
+
+        .input-area button {
+            width: 70px;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: #fff;
+            border: none;
+            border-radius: 0 5px 5px 0;
+            cursor: pointer;
+            float: right;
+        }
+
+            .input-area button:hover {
+                background-color: #45a049;
+            }
+
+    .addGroup {
+        margin-top: 10px;
+        /* background-color: #e0e0e0; */
+        /* border: none; */
+        /* border-radius: 0 5px 5px 0; */
+    }
+</style>
+@if (!IsAuthenticate)
+{
+    <Toasts class="p-3" Messages="AuthenticationMessages" AutoHide="true" StackLength="3" Placement="ToastsPlacement.TopRight" />
+
+    <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+        <Card Color="CardColor.Light" Class="mb-4" Style="width:18rem;">
+            <CardHeader>Chat Room</CardHeader>
+            <CardBody>
+                <CardTitle>Log in</CardTitle>
+                <InputText style="padding: 10px 10px 10px 5px; display: block; width: 300px; border: none; border-bottom: 1px solid #757575;" @bind-Value="CallerUsername" placeholder="Username"></InputText>
+                @* <button @onclick=SignIn>Giriş Yap</button> *@
+                <Button class="addGroup" Color="ButtonColor.Primary" @onclick=SignIn> Log In </Button>
+            </CardBody>
+        </Card>
+    </div>
+}
+else
+{
+    @* <div class="main-container"> *@
+
+    <Toasts class="p-3" Messages="NotificationMessages" AutoHide="true" StackLength="3" Placement="ToastsPlacement.TopRight" />
+
+
+    <div class="container">
+
+        @* Sistemdeki odalar/gruplar listeleniyor.. *@
+        <div class="users">
+            <ul>
+                @* Seçili oda/gruba dahil olan clientlar listeleniyor.. *@
+                <div style="display: @displayStyle">
+                    @if (!string.IsNullOrEmpty(selectedGroup.GroupName))
+                    {
+                        <h3>@selectedGroup.GroupName Members </h3>
+                        <ul>
+                            @foreach (var client in ClientsOfGroups)
+                            {
+                                <li class="user @(client.Username.Equals(CallerUsername) ? "disabled" : "")">@client.Username</li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </ul>
+
+
+            <ul>
+                @* Sistemdeki clientlar listeleniyor.. *@
+                @*                 <div class="users"> *@
+                <h3>Contacts</h3>
+                <ul>
+                    @foreach (var client in Clients)
+                    {
+                        <li class="user @(client == selectedClient ? "active" : "") @(client.Username.Equals(CallerUsername) ? "disabled" : "")" @onclick="@(() => SelectClient(client))">@client.Username</li>
+                    }
+                </ul>
+                @*                 </div> *@
+            </ul>
+
+            <h3>Groups</h3>
+            <ul>
+                @foreach (var group in Groups.Where(x => x.Clients.Select(c => c.Username).Contains(CallerUsername)))
+                {
+                    <Tooltip Class="me-4" Title="Click to enter the room and view the members" Placement="TooltipPlacement.Right">
+                        <li class="user @(group == selectedGroup ? "active" : "")" @onclick="@(() => SelectGroup(group))">@group.GroupName</li>
+                    </Tooltip>
+                }
+            </ul>
+            <div>
+                <input style="padding: 10px 10px 10px 5px; display: block; width: 300px; border: none; border-bottom: 1px solid #757575;" type="text" @bind-value="GroupNameText" placeholder="Group Name">
+                <Button class="addGroup" Color="ButtonColor.Primary" @onclick=@(() => AddGroup(GroupNameText))> Add Group </Button>
+                @* <button class="addGroup" @onclick=@(() => AddGroup(GroupNameText))>Grup Ekle</button> *@
+            </div>
+
+        </div>
+
+
+        @* Messages with selected clients are being listed by the caller *@
+        <div class="conversation">
+            @if (selectedClient.Username != null)
+            {
+                <div class="header">
+                    <h3>@selectedClient.Username</h3>
+                </div>
+            }
+            else if (selectedGroup.GroupName != null)
+            {
+                <div class="header">
+                    <h3>@selectedGroup.GroupName</h3>
+                </div>
+            }
+            <div class="messages">
+                @for (int i = 0; i < SelectedUserMessages.Count; i++)
+                {
+                    <div class="message @(SelectedUserMessages[i].IsSenderReceiver ? "sent" : "received")">
+                        @if (SelectedUserMessages[i].IsGroupMessage && !SelectedUserMessages[i].IsSenderReceiver)
+                        {
+                            <span class="sender">Sender : @SelectedUserMessages[i].SenderClientUsername</span>
+                        }
+                        <p>@SelectedUserMessages[i].Message</p>
+                        <span class="time">@SelectedUserMessages[i].CreatedDate.ToShortTimeString()</span>
+                    </div>
+                }
+            </div>
+            <div class="input-area">
+                <input @onkeyup="@(e => KeyHandler(e))" type="text" @bind-value="TextMessage" placeholder="Write your message here.">
+                <button @onclick=@(() => SendMessageAsync(TextMessage, selectedGroup.GroupName)) disabled="@(!IsConnected)">Send</button>
+            </div>
+        </div>
+    </div>
+    @* </div> *@
+
+}
+
+
+<script>
+        document.addEventListener('DOMContentLoaded', (event) => {
+            const conversationDiv = document.querySelector('.conversation');
+
+            if (conversationDiv) {
+                conversationDiv.addEventListener('scroll', () => {
+                    if (conversationDiv.scrollTop + conversationDiv.clientHeight >= conversationDiv.scrollHeight) {
+                        // Call the Blazor method
+                        DotNet.invokeMethodAsync('SignalRChatRoom.Client', 'LoadMoreMessages');
+                    }
+                });
+            }
+        });
+ </script>
+
+@code {
+    private string displayStyle = "none"; // Initially hides the area listing clientsOfGroup.
+    List<ToastMessage> NotificationMessages = new List<ToastMessage>();
+
+    List<ClientMessage> Messages = new List<ClientMessage>(); // List to store messages related to the client.
+
+    public string CallerUsername { get; set; } = String.Empty; // Username entered during login.
+    public string TextMessage { get; set; } = String.Empty; // Message to be sent.
+    public string GroupNameText { get; set; } = String.Empty; // Group name for the message.
+
+    public bool IsAuthenticate { get; set; } = false; // Checks if the client is authenticated. (No database connection, data is stored InMemory. Only checks if the username is entered.)
+
+    private List<ClientDto> ClientsOfGroups { get; set; } = new List<ClientDto>(); // List to store clients in a specific group.
+    private List<ClientDto> Clients { get; set; } = new List<ClientDto>(); // List to store all clients logged into the system.
+
+    private List<GroupDto> Groups { get; set; } = new List<GroupDto>(); // List to store information about groups created in the system.
+
+
+
+    // Provides connection to the SignalR hub.
+    private HubConnection hubConnection;
+
+    // Actions to be taken when the component is initialized.
+    protected override async Task OnInitializedAsync()
+    {
+        // Creates a connection to the SignalR hub.
+        hubConnection = new HubConnectionBuilder()
+        .WithUrl("https://localhost:7038/chathub") // Specifies the URL of the hub to connect to.
+        .Build();
+
+        // Processes notifications from the server.
+
+        // Notifies all clients when a new user joins the system. Triggered by the server.
+        hubConnection.On<string>("clientJoined", async (username) =>
+        {
+            NotificationMessages.Add(CreateToastMessage(ToastType.Info, $"The user with the username {username} logged into the system."));
+
+            await InvokeAsync(StateHasChanged); // Calls InvokeAsync method for UI update.
+        });
+
+        // Triggered when a user in the system disconnects. Triggered by the server.
+        hubConnection.On<string>("clientLeaved", async (username) =>
+        {
+            NotificationMessages.Add(CreateToastMessage(ToastType.Info, $"The connection of the user named {username} was lost."));
+
+            await InvokeAsync(StateHasChanged); // Calls InvokeAsync method for UI update.
+        });
+
+        // When the list of clients in the system is updated (client entry/exit), the server triggers this to get the updated list.
+        hubConnection.On<List<ClientDto>>("clients", async (clientList) =>
+        {
+            Clients = clientList;
+            await InvokeAsync(StateHasChanged); // UI update.
+        });
+
+        // When the list of clients belonging to a group in the system is updated (client entry/exit), the server triggers this to get the updated list.
+        hubConnection.On<List<ClientDto>, string>("clientsOfGroup", async (clientList, groupName) =>
+        {
+            // When a client exits, they are removed from all groups they are subscribed to, and the lists are updated and sent to clients.
+            // Therefore, when the client's selected group is not the current group, the last group's client list might be visible.
+            // For this reason, the list is updated only when the client's selected group matches the group in the parameter.
+            if (selectedGroup.GroupName == groupName)
+            {
+                ClientsOfGroups = clientList;
+                await InvokeAsync(StateHasChanged); // UI update.
+            }
+        });
+
+        // Notifies all clients when a new room/group is added to the system. Triggered by the server.
+        hubConnection.On<string>("groupAdded", async (groupName) =>
+        {
+            NotificationMessages.Add(CreateToastMessage(ToastType.Info, $"A new room called {groupName} has been created"));
+            GroupNameText = String.Empty;
+            await InvokeAsync(StateHasChanged); // Calls InvokeAsync method for UI update.
+        });
+
+        // When the list of groups/rooms in the system is updated, the server triggers this to get the updated list.
+        hubConnection.On<List<GroupDto>>("groups", async (groupList) =>
+        {
+            Groups.AddRange(groupList);
+            Groups = Groups.DistinctBy(x=>x.GroupName).ToList();
+            await InvokeAsync(StateHasChanged); // UI update.
+        });
+
+        // When a caller sends a message to any client in the system, it will be triggered by the server.
+        hubConnection.On<string, ClientDto, ClientDto?, string?>("receiveMessage", async (message, senderClient, client, groupName) =>
+        {
+            // If messaging with a client..
+            if (client != null)
+            {
+                // Adds the message to the list of messages sent to the client.
+                Messages.Add(new ClientMessage() { ReceiverClientUsernameOrGroupName = client.Username, SenderClientUsername = senderClient.Username, Message = message });
+
+                // Filters the messages with the selected client by their username and assigns them to the SelectedUserMessages list.
+                FilterUserMessages(selectedClient.Username, false);
+                await InvokeAsync(StateHasChanged); // UI update.
+            }
+            else if (!string.IsNullOrEmpty(groupName)) // If messaging with a group..
+            {
+                // Adds the client's messages with the group to the Messages list.
+                Messages.Add(new ClientMessage() { ReceiverClientUsernameOrGroupName = groupName, SenderClientUsername = senderClient.Username, Message = message, IsGroupMessage = true, IsSenderReceiver = (senderClient.Username == CallerUsername) });
+
+                // Filters the messages with the selected group by its name and assigns them to the SelectedUserMessages list.
+                FilterUserMessages(groupName, true);
+                await InvokeAsync(StateHasChanged); // UI update.
+            }
+        });
+
+        // When a caller sends a message to any client in the system, it will be triggered by the server.
+        hubConnection.On<string, ClientDto, string>("groupReceiveMessage", async (message, senderClient, groupName) =>
+        {
+            // Adds the client's messages with the group to the Messages list.
+            Messages.Add(new ClientMessage() { ReceiverClientUsernameOrGroupName = groupName, SenderClientUsername = senderClient.Username, Message = message, IsGroupMessage = true, IsSenderReceiver = (senderClient.Username == CallerUsername) });
+
+            // Filters the messages with the selected group by its name and assigns them to the SelectedUserMessages list.
+            FilterUserMessages(groupName, true);
+            await InvokeAsync(StateHasChanged); // UI update.
+
+        });
+
+
+        // When a caller sends a message to any client in the system, it will be triggered by the server.
+        hubConnection.On<List<ClientMessage>>("updateReceiveMessages", async (clientMessages) =>
+        {
+            // If messaging with a client..
+            if (clientMessages != null)
+            {
+                // Adds the message to the list of messages sent to the client.
+                Messages.AddRange(clientMessages);
+                // Filters the messages with the selected client by their username and assigns them to the SelectedUserMessages list.
+                FilterUserMessages(selectedClient.Username, false);
+                await InvokeAsync(StateHasChanged); // UI update.
+            }
+        });
+
+
+        await hubConnection.StartAsync(); // Starts the hub connection.
+
+        await hubConnection.SendAsync("GetClientsAsync"); // Retrieves the list of all clients when the user logs in. (Client triggers the server.)
+    }
+
+    // Returns false if the entered username is already used by an existing client, otherwise returns true.
+    public async Task<bool> CheckUsernameAsync(string username)
+    {
+        ClientDto client = Clients.FirstOrDefault(c => c.Username == username);
+        return (client != null) ? false : true;
+    }
+
+    // Returns false if the entered groupName is already used by an existing group, otherwise returns true.
+    public async Task<bool> CheckGroupNameAsync(string groupName)
+    {
+        GroupDto group = Groups.FirstOrDefault(g => g.GroupName == groupName);
+        return (group != null) ? false : true;
+    }
+
+
+    List<ToastMessage> AuthenticationMessages = new List<ToastMessage>();
+    // Login process..
+    async Task SignIn()
+    {
+        if (!string.IsNullOrEmpty(CallerUsername))
+        {
+            // bool result = await CheckUsernameAsync(CallerUsername);
+            // if (result) // Login successful
+            // {
+            // By triggering the GetUsernameAsync method on the server, user login is reported to all clients except the caller via the clientJoined method on the client, and similarly, the Clients list is updated.
+            try
+            {
+                await hubConnection.SendAsync("GetUsernameAsync", CallerUsername);
+            }
+            catch (Exception ex)
+            {
+
+                throw ex;
+            }
+            IsAuthenticate = true;
+            await InvokeAsync(StateHasChanged); // UI update..
+                                                // }
+                                                // else
+                                                // {
+                                                //     // A warning will be given that the username is already in use.
+                                                //     AuthenticationMessages.Add(new ToastMessage()
+                                                //         {
+                                                //             Type = ToastType.Warning,
+                                                //             Title = "Login Failed",
+                                                //             HelpText = $"{DateTime.Now}",
+                                                //             Message = $"Username already taken!",
+                                                //         });
+                                                // }
+        }
+
+    }
+
+    List<ClientMessage> SelectedUserMessages = new List<ClientMessage>(); // List to hold messages related to the selected client and caller.
+
+    // Filters the messages sent by and to the client in the parameter from the Messages list.
+    void FilterUserMessages(string receiverClientNameOrGroupName, bool IsGroupMessage)
+    {
+        if (IsGroupMessage)
+        {
+            // If selectedGroup is not null and the name of the selected group matches the value in the parameter, filtering will be done.
+            if (selectedGroup.GroupName == null ? false : selectedGroup.GroupName.Equals(receiverClientNameOrGroupName) ? true : false)
+            {
+                SelectedUserMessages = Messages.Where(msg => (msg.ReceiverClientUsernameOrGroupName == receiverClientNameOrGroupName || msg.SenderClientUsername == receiverClientNameOrGroupName) && msg.IsGroupMessage).ToList();
+            }
+        }
+        else
+        {
+            // If the user has selected a client, i.e., selectedClient is not null and matches the value in the parameter, filtering will be done.
+            if (selectedClient.Username == null ? false : selectedClient.Username.Equals(receiverClientNameOrGroupName) ? true : false)
+            {
+                SelectedUserMessages = Messages.Where(msg => (msg.ReceiverClientUsernameOrGroupName == receiverClientNameOrGroupName || msg.SenderClientUsername == receiverClientNameOrGroupName) && !msg.IsGroupMessage).ToList();
+            }
+        }
+
+        #region Alternative code for filtering
+        // // Predefine conditions to be used for filtering messages..
+        // Func<ClientMessage, bool> filterCondition = msg =>
+        //     (IsGroupMessage && msg.IsGroupMessage && msg.ReceiverClientUsernameOrGroupName == receiverClientNameOrGroupName) ||
+        //     (!IsGroupMessage && !msg.IsGroupMessage && (msg.ReceiverClientUsernameOrGroupName == receiverClientNameOrGroupName || msg.SenderClientUsername == receiverClientNameOrGroupName));
+
+        // // Incoming messages are filtered according to this condition
+        // SelectedUserMessages = Messages.Where(filterCondition).ToList();
+        #endregion
+    }
+
+    private ClientDto selectedClient = new ClientDto();
+    private void SelectClient(ClientDto client)
+    {
+        // The information of the client to whom the message will be sent is assigned to selectedClient.
+        selectedClient = client;
+        selectedGroup = new GroupDto();
+        // Filters the messages with the selected client by their username and assigns them to the SelectedUserMessages list.
+        FilterUserMessages(client.Username, false);
+    }
+
+    private GroupDto selectedGroup = new GroupDto();
+    private async Task SelectGroup(GroupDto group)
+    {
+        // The information of the group to which the message will be sent is assigned to selectedGroup.
+        selectedGroup = group;
+        selectedClient = new ClientDto();
+        await AddClientToGroup(selectedGroup.GroupName);
+
+        await GetClientsOfGroup(selectedGroup.GroupName);
+
+        displayStyle = displayStyle == "none" ? "block" : "none"; // Changes the visibility of the area listing the clients belonging to a group/room.
+
+        // Filters the messages with the selected group by its GroupName and assigns them to the SelectedUserMessages list.
+        FilterUserMessages(group.GroupName, true);
+    }
+
+
+    // Triggers the server if the caller will send a message to a client or all clients.
+    async Task SendMessageAsync(string message, string? groupName)
+    {
+        try
+        {
+            // The code will not execute if the button is clicked without writing a message.
+            if (!string.IsNullOrEmpty(message))
+            {
+                // If there is a group name, the message will be sent to the respective group.
+                if (!string.IsNullOrEmpty(groupName))
+                {
+
+                    // Filters the messages in the group by the group name and assigns them to the SelectedUserMessages list.
+                    FilterUserMessages(groupName, true);
+                    StateHasChanged();
+
+                    // By triggering the SendMessageAsync method on the server, the message is sent to the selected group.
+                    await hubConnection.SendAsync("SendMessageToGroupAsync", groupName, message);
+
+                }
+                else
+                {
+
+                    // Adds the message to the Messages list to show it in the sender's client as well.
+                    Messages.Add(new ClientMessage() { Message = message, ReceiverClientUsernameOrGroupName = selectedClient.Username, SenderClientUsername = CallerUsername, IsSenderReceiver = true });
+
+                    // By triggering the SendMessageAsync method on the server, the message is sent to the selected client.
+                    await hubConnection.SendAsync("SendMessageAsync", message, selectedClient, null, null);
+
+                    // Filters the messages with the selected client by their username and assigns them to the SelectedUserMessages list.
+                    FilterUserMessages(selectedClient.Username, false);
+                    StateHasChanged();
+                }
+                // Clears the message.
+                TextMessage = string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+
+            throw ex;
+        }
+    }
+
+
+    // Triggered when creating a room.
+    async Task AddGroup(string groupNameText)
+    {
+        // The code will only run if the group name is entered before clicking the button.
+        if (!string.IsNullOrEmpty(groupNameText))
+        {
+            bool result = await CheckGroupNameAsync(groupNameText);
+            if (result) // If the room name is available...
+            {
+                try
+                {
+                    // Triggers the AddGroupAsync method on the server to create a group.
+                    await hubConnection.SendAsync("AddGroupAsync", groupNameText);
+                }
+                catch (Exception)
+                {
+
+                    throw;
+                }
+
+                // Clear the group creation input.
+                groupNameText = string.Empty;
+            }
+            else
+            {
+                // Displays a warning that the room name is already in use.
+                NotificationMessages.Add(new ToastMessage()
+                    {
+                        Type = ToastType.Warning,
+                        Title = "Operation Unsuccessful",
+                        HelpText = $"{DateTime.Now}",
+                        Message = "A room with this name already exists.",
+                    });
+            }
+        }
+    }
+
+    // Triggered when a caller enters a room.
+    async Task AddClientToGroup(string groupName)
+    {
+        // The AddClientToGroupAsync method on the server is triggered to include the caller in the selected group.
+        await hubConnection.SendAsync("AddClientToGroupAsync", groupName);
+    }
+
+    // Returns a list of all clients belonging to the relevant group when triggered.
+    async Task GetClientsOfGroup(string groupName)
+    {
+        // Triggers the GetClientsOfGroupAsync method on the server to return the list of all clients subscribed to the selected group, and the clients method on the client side is triggered by the server.
+        await hubConnection.SendAsync("GetClientsOfGroupAsync", groupName);
+    }
+
+    // Triggers the SendMessageAsync function when Enter is pressed in the message input.
+    private async Task KeyHandler(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SendMessageAsync(TextMessage, selectedGroup.GroupName);
+        }
+    }
+
+    // Cleans up the hubConnection object when it is no longer in use.
+    public async ValueTask DisposeAsync()
+    {
+        // If the hubConnection object is not null (i.e., defined)
+        if (hubConnection is not null)
+        {
+            // Performs the cleanup of the hubConnection object and releases the connection resources.
+            await hubConnection.DisposeAsync();
+        }
+    }
+
+    private ToastMessage CreateToastMessage(ToastType toastType, string message)
+    => new ToastMessage
+        {
+            Type = toastType,
+            Title = "User login",
+            HelpText = $"{DateTime.Now}",
+            Message = $"{message}",
+        };
+
+    //Update Client message history when scrole chat page
+    async Task UpdateClientMessageHistory(long clientId, string clientConnectionId, int? pageNumber = null, int? pageSize = null)
+    {
+        await hubConnection.SendAsync("UpdateClientMessageHistoryAsync", clientId, clientConnectionId, pageNumber , pageSize);
+    }
+
+    // JSInvokable method to load more messages
+    [JSInvokable]
+    public async Task LoadMoreMessages()
+    {
+        var clientId = selectedClient.Id;
+        var clientConnectionId = selectedClient.ConnectionId;
+        await UpdateClientMessageHistory(clientId, clientConnectionId, 1, 10);
+    }
+
+    public bool IsConnected =>
+       hubConnection?.State == HubConnectionState.Connected;
+}
